@@ -2,7 +2,7 @@
 just creates tagged text with pretty colors
 
 # how 2 build
-needs wxwidgets
+needs wxwidgets and lua
 
 ```
 git clone https://github.com/Xzyaihni/terrariacolorer

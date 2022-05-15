@@ -4,13 +4,23 @@
 #include <string>
 #include <vector>
 
-namespace colorer
-{
-    enum class gradient {rainbow};
+#include <lua.hpp>
 
+class lua_exception : public std::exception
+{
+public:
+    lua_exception(const std::string message);
+
+    const char* what() const noexcept override;
+private:
+    std::string _message;
+};
+
+class colorer
+{
+public:
     struct generate_options
     {
-        gradient colors;
         float fuzz = 0;
         float offset = 0;
     };
@@ -21,16 +31,30 @@ namespace colorer
         float g;
         float b;
 
-        static std::wstring hex_single(const float col);
-        std::wstring hex() const;
+        static std::wstring hex_single(const float col) noexcept;
+        std::wstring hex() const noexcept;
     };
 
-    bool whitespace(const wchar_t literal);
+    colorer();
+    colorer(const colorer&) = default;
+    colorer(colorer&&) noexcept = default;
+    colorer& operator=(const colorer&) = default;
+    colorer& operator=(colorer&&) noexcept = default;
 
-    float divide_gradient(const float divisor, const int mult, const float value, const float fuzz);
+    ~colorer();
 
-    std::vector<color> generate_colors(const std::wstring text, const generate_options options);
-    std::wstring generate_codes(const std::wstring text, const std::vector<color> colors);
+    void update_lua(const std::string filename);
+
+    std::vector<color> generate_colors(const std::wstring text, const generate_options options) const;
+    static std::wstring generate_codes(const std::wstring text, const std::vector<color> colors) noexcept;
+
+    bool updated = false;
+
+private:
+    color divide_gradient(const float value, const float fuzz) const;
+    static bool whitespace(const wchar_t literal) noexcept;
+
+    lua_State* _lua_state = nullptr;
 };
 
 #endif

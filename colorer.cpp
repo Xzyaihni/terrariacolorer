@@ -1,8 +1,21 @@
+#include <iostream>
+#include <array>
+#include <cstring>
+
 #include "colorer.h"
 
-#include <iostream>
 
-std::wstring colorer::color::hex_single(const float col)
+lua_exception::lua_exception(const std::string message)
+: _message(message)
+{
+}
+
+const char* lua_exception::what() const noexcept
+{
+    return _message.c_str();
+}
+
+std::wstring colorer::color::hex_single(const float col) noexcept
 {
     char color_str[2];
     sprintf(color_str, "%02x", static_cast<uint8_t>(col*255));
@@ -13,42 +26,47 @@ std::wstring colorer::color::hex_single(const float col)
     return std::wstring(color_wstr, 2);
 }
 
-std::wstring colorer::color::hex() const
+std::wstring colorer::color::hex() const noexcept
 {
     return hex_single(r) + hex_single(g) + hex_single(b);
 }
 
-bool colorer::whitespace(const wchar_t literal)
+colorer::colorer()
 {
-    return static_cast<unsigned>(literal)==32;
 }
 
-float colorer::divide_gradient(const float divisor, const int mult, const float value, const float fuzz)
+colorer::~colorer()
 {
-    float lower_edge = divisor*(mult);
-    if(lower_edge<0)
-        ++lower_edge;
+    if(_lua_state!=nullptr)
+        lua_close(_lua_state);
+}
 
-    float upper_edge = divisor*(mult+1);
-    if(upper_edge>1)
-        --upper_edge;
+void colorer::update_lua(const std::string filename)
+{
+    if(_lua_state!=nullptr)
+        lua_close(_lua_state);
 
-    float start_distance = value-lower_edge;
-    start_distance = start_distance<0 ? 1+start_distance : start_distance;
+    updated = false;
 
-    if(start_distance<1)
+
+    _lua_state = luaL_newstate();
+
+    luaL_openlibs(_lua_state);
+
+    const int error_state =
+        luaL_loadfile(_lua_state, filename.data())
+        || lua_pcall(_lua_state, 0, 0, 0);
+
+    if(error_state)
     {
-        const float closest_distance = start_distance<0.5f ?
-            start_distance : 1-start_distance;
+        const std::string error_string(lua_tostring(_lua_state, -1));
+        lua_pop(_lua_state, 1);
 
-        return std::clamp(closest_distance*(1/fuzz), 0.0f, 1.0f);
-    } else
-    {
-        return 0;
+        throw lua_exception(error_string);
     }
 }
 
-std::vector<colorer::color> colorer::generate_colors(const std::wstring text, const generate_options options)
+std::vector<colorer::color> colorer::generate_colors(const std::wstring text, const generate_options options) const
 {
     std::vector<color> output_colors;
     output_colors.reserve(text.length());
@@ -64,9 +82,6 @@ std::vector<colorer::color> colorer::generate_colors(const std::wstring text, co
     const float color_shift = 1.0f/(text.length()-whitespace_count);
     float c_color_offset = options.offset;
 
-    const int colors_amount = 3;
-    const float color_divisor = 1.0f/colors_amount;
-
     for(int i = 0; i < text.length(); ++i)
     {
         //if whitespace, dont advance color
@@ -77,17 +92,13 @@ std::vector<colorer::color> colorer::generate_colors(const std::wstring text, co
                 --c_color_offset;
         }
 
-        const color c_color{divide_gradient(color_divisor, 0, c_color_offset, options.fuzz),
-            divide_gradient(color_divisor, 1, c_color_offset, options.fuzz),
-            divide_gradient(color_divisor, 2, c_color_offset, options.fuzz)};
-
-        output_colors.emplace_back(c_color);
+        output_colors.emplace_back(divide_gradient(c_color_offset, options.fuzz));
     }
 
     return output_colors;
 }
 
-std::wstring colorer::generate_codes(const std::wstring text, const std::vector<color> colors)
+std::wstring colorer::generate_codes(const std::wstring text, const std::vector<color> colors) noexcept
 {
     std::wstring output_text;
 
@@ -111,4 +122,40 @@ std::wstring colorer::generate_codes(const std::wstring text, const std::vector<
     }
 
     return output_text;
+}
+
+colorer::color colorer::divide_gradient(const float value, const float fuzz) const
+{
+    if(_lua_state==nullptr)
+        return {0, 0, 0};
+
+    lua_getglobal(_lua_state, "color_func");
+    lua_pushnumber(_lua_state, value);
+    lua_pushnumber(_lua_state, fuzz);
+
+    if(lua_pcall(_lua_state, 2, 1, 0) || !lua_istable(_lua_state, -1))
+       throw lua_exception(lua_tostring(_lua_state, -1));
+
+    auto table_val = [this](const char* key)
+    {
+        lua_pushstring(_lua_state, key);
+        lua_gettable(_lua_state, -2);
+
+        const float table_num = static_cast<float>(lua_tonumber(_lua_state, -1));
+
+        lua_pop(_lua_state, 1);
+
+        return table_num;
+    };
+
+    const color c_color{table_val("r"), table_val("g"), table_val("b")};
+
+    lua_pop(_lua_state, 1);
+
+    return c_color;
+}
+
+bool colorer::whitespace(const wchar_t literal) noexcept
+{
+    return static_cast<unsigned>(literal)==32;
 }
