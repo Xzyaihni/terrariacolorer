@@ -17,7 +17,7 @@ const char* lua_exception::what() const noexcept
 
 std::wstring colorer::color::hex_single(const float col) noexcept
 {
-    char color_str[2];
+    char color_str[3];
     sprintf(color_str, "%02x", static_cast<uint8_t>(col*255));
 
     wchar_t color_wstr[2];
